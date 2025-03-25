@@ -29,7 +29,7 @@ T read_type(char *v)
     T a;
 
     std::memcpy(&a, v, sizeof(T));
-    /*switch (sizeof(T))
+    switch (sizeof(T))
     {
         case 1:
             break;
@@ -42,7 +42,7 @@ T read_type(char *v)
         case 8:
             a = be64toh(a);
             break;
-    }*/
+    }
     return a;
 }
 template<>
