@@ -26,28 +26,31 @@ void netlib::recv_th()
     {
         events_ready = kevent(epfd, NULL, 0, events, 1024, &timeout);
         if (events_ready == -1)
-            std::printf("Epoll error! {}", strerror(errno));
+            std::println("Epoll error! {}", strerror(errno));
         for (int i = 0; i < events_ready; i++)
         {
             std::unique_lock<std::mutex> lk(mut);
             int current_fd = events[i].ident;
+            auto &current_user = users.find(current_fd)->second;
             size_t available;
             ioctl(current_fd, FIONREAD, &available);
-            if (available > data_alloc_size - data_size)
+            if (available > current_user.data_alloc_size - current_user.data_size)
             {
-                std::shared_ptr<char[]> newBuffer(new char[data_size + available + 1]);
-                std::memcpy(newBuffer.get(), data.get(), data_size);
-                data.reset();
-                data = newBuffer;
-                data_alloc_size = data_size + available + 1;
+                std::shared_ptr<char[]> newBuffer(new char[current_user.data_size + available + 1]);
+                std::memcpy(newBuffer.get(), current_user.data.get(), current_user.data_size);
+                current_user.data.reset();
+                current_user.data = newBuffer;
+                current_user.data_alloc_size = current_user.data_size + available + 1;
             }
-            status = recv(current_fd, &data.get()[data_size], available, 0);
+            status = recv(current_fd, &(current_user.data.get())[current_user.data_size], available, 0);
             if (status == -1 || status == 0)
             {
                 disconnect_user(current_fd);
                 continue;
             }
-            data_size += available;
+            current_user.data_size += available;
+            if (current_user.data_size >= current_user.default_size)
+                current_user.readable = true;
             lk.unlock();
             cond.notify_all();
             std::println("Got {}B of data", available);
@@ -74,7 +77,7 @@ void netlib::accept_th()
         netlib::add_to_list(new_client);
         struct in_addr ipAddr = addr.sin_addr;
         std::println("{} connected", inet_ntop(AF_INET, &ipAddr, str, INET_ADDRSTRLEN));
-        users.push_back(new_client);
+        users.emplace(std::piecewise_construct, std::forward_as_tuple(new_client), std::forward_as_tuple(new_client, default_packet_size));
     }
 }
 
@@ -83,7 +86,7 @@ void netlib::disconnect_user(int current_fd)
     remove_from_list(fd, epfd);
     //std::println("Removed fd {} from epoll", fd);
     close(fd);
-    users.erase(std::remove(users.begin(), users.end(), current_fd), users.end());
+    //users.erase(current_fd);
 }
 
 
