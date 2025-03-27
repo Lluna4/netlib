@@ -3,5 +3,5 @@ project(netlib VERSION 0.1.0 LANGUAGES C CXX)
 
 add_compile_options(-std=c++23)
 
-add_library(netlib netlib.cpp utils.cpp comp_time_read.cpp comp_time_write.cpp)
+add_library(netlib netlib.h utils.cpp comp_time_read.cpp comp_time_write.cpp)
 
