@@ -77,7 +77,7 @@ class netlib
         std::thread accept_thread;
         std::thread recv_thread;
 };
-
+#ifdef __APPLE__
 template<typename B>
 void netlib<B>::add_to_list(int sockfd)
 {
@@ -93,6 +93,24 @@ void netlib<B>::remove_from_list(int fd, int epfd)
     EV_SET(&ev, fd, EVFILT_READ, EV_DELETE, 0, 0, 0);
     kevent(epfd, &ev, 1, NULL, 0, NULL);
 }
+#endif
+
+#ifdef __linux__
+template<typename B>
+void netlib<B>::add_to_list(int sockfd)
+{
+    epoll_event event;
+    event.data.fd = fd;
+    event.events = EPOLLIN;
+    epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event);
+}
+
+template<typename B>
+void netlib<B>::remove_from_list(int fd, int epfd)
+{
+	epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);
+}
+#endif
 
 template<typename B>
 void netlib<B>::recv_th()
@@ -105,13 +123,23 @@ void netlib<B>::recv_th()
     timeout.tv_nsec = 500000000; //500ms
     while (threads == true)
     {
+        #ifdef __APPLE__
         events_ready = kevent(epfd, NULL, 0, events, 1024, &timeout);
+        #endif
+        #ifdef __linux__
+        events_ready = epoll_wait(epfd, events, 1024, -1);
+        #endif
         if (events_ready == -1)
             std::println("Epoll error! {}", strerror(errno));
         for (int i = 0; i < events_ready; i++)
         {
             std::unique_lock<std::mutex> lk(mut);
+            #ifdef __APPLE__
             int current_fd = events[i].ident;
+            #endif
+            #ifdef __linux__
+            int current_fd = events[i].data.fd;
+            #endif
             auto current_user_test = users.find(current_fd);
             if (current_user_test == users.end())
                 continue;
@@ -287,9 +315,12 @@ inline std::tuple<T...> netlib<B>::read_pkt(std::tuple<T...> packet, int timeout
     current_user.data.reset();
     current_user.data = newBuffer;
     current_user.data_size = current_user.data_size - size2;
-    current_user.readable = false;
     std::lock_guard<std::mutex> lock(internal);
-    readable.erase(std::remove(readable.begin(), readable.end(), current_fd), readable.end());
+    if (current_user.data_size <= 0)
+    {
+        current_user.readable = false;
+        readable.erase(std::remove(readable.begin(), readable.end(), current_fd), readable.end());
+    }
     std::println("data size is {}", current_user.data_size);
     return packet;
 }
