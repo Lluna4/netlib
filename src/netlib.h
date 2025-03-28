@@ -4,7 +4,12 @@
 #include <arpa/inet.h>
 #include <print>
 #include <thread>
+#ifdef __APPLE__
 #include <sys/event.h>
+#endif
+#ifdef __linux__
+#include <sys/epoll.h>
+#endif
 #include <vector>
 #include <unistd.h>
 #include <fcntl.h>

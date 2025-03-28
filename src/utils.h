@@ -1,6 +1,7 @@
 #pragma once
 #include <cstring>
 #include <string>
+#include <cstdint>
 #ifdef __APPLE__
 #include <libkern/OSByteOrder.h>
 
