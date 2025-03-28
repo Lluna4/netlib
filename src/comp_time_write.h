@@ -118,9 +118,9 @@ struct write_var<char_size>
 };
 
 template<typename T>
-struct write_var<std::vector<T>>
+struct write_var<std::vector<T, std::allocator<T>>>
 {
-    static void call(char_size *v, std::vector<T> value)
+    static void call(char_size *v, std::vector<T, std::allocator<T>> value)
     {
         for (auto val : value)
         {
