@@ -4,12 +4,7 @@
 #include <arpa/inet.h>
 #include <print>
 #include <thread>
-#ifdef __APPLE__
 #include <sys/event.h>
-#endif
-#ifdef __linux__
-#include <sys/epoll.h>
-#endif
 #include <vector>
 #include <unistd.h>
 #include <fcntl.h>
@@ -82,7 +77,7 @@ class netlib
         std::thread accept_thread;
         std::thread recv_thread;
 };
-#ifdef __APPLE__
+
 template<typename B>
 void netlib<B>::add_to_list(int sockfd)
 {
@@ -98,40 +93,27 @@ void netlib<B>::remove_from_list(int fd, int epfd)
     EV_SET(&ev, fd, EVFILT_READ, EV_DELETE, 0, 0, 0);
     kevent(epfd, &ev, 1, NULL, 0, NULL);
 }
-#endif
-
-#ifdef __linux__
-template<typename B>
-void netlib<B>::add_to_list(int sockfd)
-{
-    epoll_event event;
-    event.data.fd = fd;
-    event.events = EPOLLIN;
-    epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event);
-}
-
-template<typename B>
-void netlib<B>::remove_from_list(int fd, int epfd)
-{
-	epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);
-}
-#endif
 
 template<typename B>
 void netlib<B>::recv_th()
 {
     int events_ready = 0;
+    #if defined(__APPLE__) || defined(__FreeBSD__)
     struct kevent events[1024];
+    #elif defined(__linux__)
+    epoll_event events[1024];
+    #endif
     int status = 0;
+    #if defined(__APPLE__) || defined(__FreeBSD__)
     struct timespec timeout;
     timeout.tv_sec = 0;
     timeout.tv_nsec = 500000000; //500ms
+    #endif
     while (threads == true)
     {
-        #ifdef __APPLE__
+        #if defined(__APPLE__) || defined(__FreeBSD__)
         events_ready = kevent(epfd, NULL, 0, events, 1024, &timeout);
-        #endif
-        #ifdef __linux__
+        #elif defined(__linux__)
         events_ready = epoll_wait(epfd, events, 1024, -1);
         #endif
         if (events_ready == -1)
@@ -139,12 +121,7 @@ void netlib<B>::recv_th()
         for (int i = 0; i < events_ready; i++)
         {
             std::unique_lock<std::mutex> lk(mut);
-            #ifdef __APPLE__
             int current_fd = events[i].ident;
-            #endif
-            #ifdef __linux__
-            int current_fd = events[i].data.fd;
-            #endif
             auto current_user_test = users.find(current_fd);
             if (current_user_test == users.end())
                 continue;
@@ -275,7 +252,11 @@ void netlib<B>::open_server(std::string address, short port)
         close(fd);
         return ;
     }
+    #if defined(__APPLE__) || defined(__FreeBSD__)
     epfd = kqueue();
+    #elif defined(__linux__)
+    epfd = epoll_create1(0);
+    #endif
     accept_thread = std::thread([this]() { this->accept_th(); });
     recv_thread = std::thread([this]() { this->recv_th(); });
 }
@@ -291,9 +272,9 @@ inline std::tuple<T...> netlib<B>::read_pkt(std::tuple<T...> packet, int timeout
     if (current_user_test == users.end() || current_user_test->second.fd < 2)
         return packet;
     auto &current_user = current_user_test->second;
+    std::unique_lock<std::mutex> lk(mut);
     if (size2 > current_user.data_size)
     {
-        std::unique_lock<std::mutex> lk(mut);
         if (timeout >= 0)
         {
             if (cond.wait_for(lk, std::chrono::seconds(timeout)) == std::cv_status::timeout)
