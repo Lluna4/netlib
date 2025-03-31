@@ -3,6 +3,9 @@
 #include <tuple>
 #include <stdlib.h>
 #include "utils.h"
+#ifdef __FreeBSD__
+#include <sys/endian.h>
+#endif
 #ifdef __APPLE__
 #include <libkern/OSByteOrder.h>
 

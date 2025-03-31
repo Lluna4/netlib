@@ -2,6 +2,9 @@
 #include <cstring>
 #include <string>
 #include <cstdint>
+#ifdef __FreeBSD__
+#include <sys/endian.h>
+#endif
 #ifdef __APPLE__
 #include <libkern/OSByteOrder.h>
 
