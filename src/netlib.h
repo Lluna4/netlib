@@ -28,38 +28,26 @@ struct packet_raw
 template <typename T>
 struct user
 {
-    user(int sockfd, int size)
-    :fd(sockfd), default_size(size)
-    {
-        readable = false;
-        data_size = 0;
-        data_alloc_size = 1024;
-        data = std::make_shared<char []>(1024);
-        erase = false;
-    }
+    user(int sockfd)
+    :fd(sockfd)
+    {}
     int fd;
-    int data_size;
-    int data_alloc_size;
-    std::shared_ptr<char []> data;
     std::vector<packet_raw<T>> packets;
-    int default_size;
-    bool readable;
-    bool erase;
 };
 
 namespace netlib
 {
     template<typename T>
-    class netlib
+    class server
     {
         public:
-            netlib()
+            server()
             {
                 fd = 0;
                 epfd = 0;
                 threads = true;
             }
-            ~netlib()
+            ~server()
             {
                 threads = false;
                 recv_thread.join();
@@ -67,6 +55,7 @@ namespace netlib
             int fd;
             void open_server(std::string address, short port);
             void disconnect_user(int current_fd);
+            std::map<int, std::vector<packet_raw<T>>> check_packets();
             std::vector<int> readable;
             std::map<int, user<T>> users;
             std::mutex sync;
@@ -80,7 +69,7 @@ namespace netlib
     };
 }
 template <typename T>
-inline void netlib::netlib<T>::open_server(std::string address, short port)
+inline void netlib::server<T>::open_server(std::string address, short port)
 {
     fd = socket(AF_INET, SOCK_STREAM, 0);
     sockaddr_in addr = {0};
@@ -110,7 +99,7 @@ inline void netlib::netlib<T>::open_server(std::string address, short port)
     recv_thread = std::thread([this]() { this->recv_th(); });
 }
 template<typename T>
-void netlib::netlib<T>::disconnect_user(int current_fd)
+void netlib::server<T>::disconnect_user(int current_fd)
 {
     remove_from_list(current_fd, epfd);
     std::println("Removed fd {} from epoll", current_fd);
@@ -120,7 +109,7 @@ void netlib::netlib<T>::disconnect_user(int current_fd)
 }
 
 template <typename T>
-void netlib::netlib<T>::add_to_list(int sockfd)
+void netlib::server<T>::add_to_list(int sockfd)
 {
     struct kevent ev;
     EV_SET(&ev, sockfd, EVFILT_READ, EV_ADD, 0, 0, 0);
@@ -128,7 +117,7 @@ void netlib::netlib<T>::add_to_list(int sockfd)
 }
 
 template<typename T>
-void netlib::netlib<T>::remove_from_list(int fd, int epfd)
+void netlib::server<T>::remove_from_list(int fd, int epfd)
 {
     struct kevent ev;
     EV_SET(&ev, fd, EVFILT_READ, EV_DELETE, 0, 0, 0);
@@ -136,7 +125,7 @@ void netlib::netlib<T>::remove_from_list(int fd, int epfd)
 }
 
 template <typename T>
-inline void netlib::netlib<T>::recv_th()
+inline void netlib::server<T>::recv_th()
 {
     int events_ready = 0;
     struct kevent events[1024];
@@ -146,7 +135,7 @@ inline void netlib::netlib<T>::recv_th()
     int status = 0;
     while (threads == true)
     {
-        events_ready = kevent(epfd, NULL, 0, events, 1024, nullptr);
+        events_ready = kevent(epfd, NULL, 0, events, 1024, &timeout);
         if (events_ready == -1)
         {
             std::println("Epoll/kqueue failed {}", strerror(errno));
@@ -162,11 +151,11 @@ inline void netlib::netlib<T>::recv_th()
                 char str[INET_ADDRSTRLEN];
                 int new_client = accept(fd, (sockaddr *)&addr, &addr_size);
                 std::println("Client accepted");
-                netlib::add_to_list(new_client);
+                add_to_list(new_client);
                 struct in_addr ipAddr = addr.sin_addr;
                 std::println("{} connected", inet_ntop(AF_INET, &ipAddr, str, INET_ADDRSTRLEN));
                 std::println("New fd {}", new_client);
-                users.emplace(std::piecewise_construct, std::forward_as_tuple(new_client), std::forward_as_tuple(new_client, sizeof(T)));
+                users.emplace(std::piecewise_construct, std::forward_as_tuple(new_client), std::forward_as_tuple(new_client));
                 continue;
             }
             auto current_user_prov = users.find(current_fd);
@@ -180,6 +169,7 @@ inline void netlib::netlib<T>::recv_th()
             status = recv(current_fd, &head, sizeof(T), MSG_PEEK);
             if (status == -1 || status == 0)
             {
+                std::lock_guard<std::mutex> lock(sync);
                 disconnect_user(current_fd);
                 continue;
             }
@@ -189,6 +179,7 @@ inline void netlib::netlib<T>::recv_th()
             status = recv(current_fd, pkt.data, pkt.size, 0);
             if (status == -1 || status == 0)
             {
+                std::lock_guard<std::mutex> lock(sync);
                 disconnect_user(current_fd);
                 continue;
             }
@@ -217,3 +208,17 @@ inline void netlib::netlib<T>::recv_th()
     }
 }
 
+template <typename T>
+std::map<int, std::vector<packet_raw<T>>> netlib::server<T>::check_packets()
+{
+    std::unique_lock<std::mutex> lock(sync);
+    std::map<int, std::vector<packet_raw<T>>> ret;
+    for (auto current_fd: readable)
+    {
+        user<T> &current_user = users.find(current_fd)->second;
+        ret.emplace(std::piecewise_construct, std::forward_as_tuple(current_fd), std::forward_as_tuple(current_user.packets));
+        current_user.packets.clear();
+        readable.erase(std::remove(readable.begin(), readable.end(), current_fd), readable.end());
+    }
+    return ret;
+}

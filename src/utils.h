@@ -61,3 +61,4 @@ struct packet
 
 double read_double(char *buf);
 float read_float(char *buf);
+char *mem_dup(char *buf, int size);

@@ -23,3 +23,10 @@ float read_float(char *buf)
 
 	return num;
 }
+
+char *mem_dup(char *buf, int size)
+{
+	char *ret = (char *)calloc(size + 1, sizeof(char));
+	memcpy(ret, buf, (size));
+	return ret;
+}
