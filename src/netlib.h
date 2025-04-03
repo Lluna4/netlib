@@ -18,6 +18,14 @@
 #include "comp_time_read.h"
 #include "comp_time_write.h"
 
+template <typename T>
+struct packet_raw
+{
+    T size;
+    char *data;
+};
+
+template <typename T>
 struct user
 {
     user(int sockfd, int size)
@@ -33,203 +41,48 @@ struct user
     int data_size;
     int data_alloc_size;
     std::shared_ptr<char []> data;
+    std::vector<packet_raw<T>> packets;
     int default_size;
     bool readable;
     bool erase;
 };
 
-template<typename B>
-class netlib
+namespace netlib
 {
-    public:
-        netlib()
-        {
-            fd = 0;
-            epfd = 0;
-            threads = true;
-            default_packet_size = sizeof(B);
-        }
-        ~netlib()
-        {
-            threads = false;
-            accept_thread.join();
-            recv_thread.join();
-        }
-        void add_to_list(int sockfd);
-        void remove_from_list(int fd, int epfd);
-        void open_server(std::string address, short port);
-        template<typename ...T>
-        std::tuple<T...> read_pkt(std::tuple<T...> packet, int timeout, int current_fd);
-        std::map<int, user> users;
-        std::vector<int> readable;
-        int default_packet_size;
-        std::mutex sync;
-    private:
-        void accept_th();
-        void recv_th();
-        void disconnect_user(int current_fd);
-        std::mutex mut;
-        std::mutex internal;
-        std::condition_variable cond;
-        int fd;
-        int epfd;
-        bool threads;
-        std::thread accept_thread;
-        std::thread recv_thread;
-};
-
-template<typename B>
-void netlib<B>::add_to_list(int sockfd)
-{
-    struct kevent ev;
-    EV_SET(&ev, sockfd, EVFILT_READ, EV_ADD, 0, 0, 0);
-    kevent(epfd, &ev, 1, NULL, 0, NULL);
-}
-
-template<typename B>
-void netlib<B>::remove_from_list(int fd, int epfd)
-{
-    struct kevent ev;
-    EV_SET(&ev, fd, EVFILT_READ, EV_DELETE, 0, 0, 0);
-    kevent(epfd, &ev, 1, NULL, 0, NULL);
-}
-
-template<typename B>
-void netlib<B>::recv_th()
-{
-    int events_ready = 0;
-    #if defined(__APPLE__) || defined(__FreeBSD__)
-    struct kevent events[1024];
-    #elif defined(__linux__)
-    epoll_event events[1024];
-    #endif
-    int status = 0;
-    #if defined(__APPLE__) || defined(__FreeBSD__)
-    struct timespec timeout;
-    timeout.tv_sec = 0;
-    timeout.tv_nsec = 500000000; //500ms
-    #endif
-    while (threads == true)
+    template<typename T>
+    class netlib
     {
-        #if defined(__APPLE__) || defined(__FreeBSD__)
-        events_ready = kevent(epfd, NULL, 0, events, 1024, &timeout);
-        #elif defined(__linux__)
-        events_ready = epoll_wait(epfd, events, 1024, -1);
-        #endif
-        if (events_ready == -1)
-            std::println("Epoll error! {}", strerror(errno));
-        for (int i = 0; i < events_ready; i++)
-        {
-            std::unique_lock<std::mutex> lk(mut);
-            int current_fd = events[i].ident;
-            auto current_user_test = users.find(current_fd);
-            if (current_user_test == users.end())
-                continue;
-            auto &current_user = current_user_test->second;
-            size_t available;
-            ioctl(current_fd, FIONREAD, &available);
-            if (available > current_user.data_alloc_size - current_user.data_size)
+        public:
+            netlib()
             {
-                std::shared_ptr<char[]> newBuffer(new char[current_user.data_size + available + 1]);
-                std::memcpy(newBuffer.get(), current_user.data.get(), current_user.data_size);
-                current_user.data.reset();
-                current_user.data = newBuffer;
-                current_user.data_alloc_size = current_user.data_size + available + 1;
+                fd = 0;
+                epfd = 0;
+                threads = true;
             }
-            status = recv(current_fd, &(current_user.data.get())[current_user.data_size], available, 0);
-            if (status == -1 || status == 0)
+            ~netlib()
             {
-                disconnect_user(current_fd);
-                std::println("Disconnected with status {}", status);
-                if (status == -1)
-                    std::println("{}", strerror(errno));
-                lk.unlock();
-                cond.notify_all();
-                continue;
+                threads = false;
+                recv_thread.join();
             }
-            std::tuple<B> pkt_size;
-            char_size buff = {.data = current_user.data.get(), .consumed_size = 0, .max_size = (int)current_user.data_alloc_size, .start_data = current_user.data.get()};
-            constexpr std::size_t size = std::tuple_size_v<decltype(pkt_size)>;
-            read_comp_pkt(size, buff, pkt_size);
-            current_user.data_size += available;
-            std::println("New packet size {}", current_user.default_size);
-            if (current_user.data_size >= std::get<0>(pkt_size))
-            {
-                current_user.readable = true;
-                std::lock_guard<std::mutex> lock(sync);
-                std::lock_guard<std::mutex> lock2(internal);
-                readable.push_back(current_fd);
-            }
-            else
-            {
-                int data_recv = 0;
-                bool user_disconnect = false;
-                while (data_recv < std::get<0>(pkt_size) + default_packet_size)
-                {
-                    int data_left = (std::get<0>(pkt_size) + default_packet_size) - data_recv; 
-                    status = recv(current_fd, &(current_user.data.get())[data_recv], data_left, 0);
-                    if (status == -1 || status == 0)
-                    {
-                        disconnect_user(current_fd);
-                        std::println("Disconnected with status {}", status);
-                        if (status == -1)
-                            std::println("{}", strerror(errno));
-                        lk.unlock();
-                        cond.notify_all();
-                        user_disconnect = true;
-                        break;
-                    }
-                    data_recv += status;
-                }
-                if (user_disconnect == true)
-                    continue;
-            }
-            lk.unlock();
-            cond.notify_all();
-            std::println("Got {}B of data", available);
-        }
-    }
+            int fd;
+            void open_server(std::string address, short port);
+            void disconnect_user(int current_fd);
+            std::vector<int> readable;
+            std::map<int, user<T>> users;
+            std::mutex sync;
+        private:
+            void add_to_list(int sockfd);
+            void remove_from_list(int fd, int epfd);
+            void recv_th();
+            int epfd;
+            bool threads;
+            std::thread recv_thread;
+    };
 }
-
-template<typename B>
-void netlib<B>::accept_th()
-{
-    sockaddr_in addr = {0};
-    unsigned int addr_size = sizeof(addr);
-    char str[INET_ADDRSTRLEN];
-    std::println("Listening for clients");
-    while (threads == true)
-    {
-        int new_client = accept(fd, (sockaddr *)&addr, &addr_size);
-        if (new_client < 0)
-        {
-            //std::println("Returned {}", strerror(errno));
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            continue;
-        }
-        std::println("Client accepted");
-        netlib::add_to_list(new_client);
-        struct in_addr ipAddr = addr.sin_addr;
-        std::println("{} connected", inet_ntop(AF_INET, &ipAddr, str, INET_ADDRSTRLEN));
-        std::println("New fd {}", new_client);
-        users.emplace(std::piecewise_construct, std::forward_as_tuple(new_client), std::forward_as_tuple(new_client, default_packet_size));
-    }
-}
-
-template<typename B>
-void netlib<B>::disconnect_user(int current_fd)
-{
-    remove_from_list(current_fd, epfd);
-    std::println("Removed fd {} from epoll", current_fd);
-    close(current_fd);
-    users.erase(current_fd);
-}
-
-template<typename B>
-void netlib<B>::open_server(std::string address, short port)
+template <typename T>
+inline void netlib::netlib<T>::open_server(std::string address, short port)
 {
     fd = socket(AF_INET, SOCK_STREAM, 0);
-    fcntl(fd, F_SETFL, O_NONBLOCK);
     sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
@@ -252,61 +105,115 @@ void netlib<B>::open_server(std::string address, short port)
         close(fd);
         return ;
     }
-    #if defined(__APPLE__) || defined(__FreeBSD__)
     epfd = kqueue();
-    #elif defined(__linux__)
-    epfd = epoll_create1(0);
-    #endif
-    accept_thread = std::thread([this]() { this->accept_th(); });
+    add_to_list(fd);
     recv_thread = std::thread([this]() { this->recv_th(); });
 }
-
-template<typename B>
-template <typename... T>
-inline std::tuple<T...> netlib<B>::read_pkt(std::tuple<T...> packet, int timeout, int current_fd)
+template<typename T>
+void netlib::netlib<T>::disconnect_user(int current_fd)
 {
-    constexpr std::size_t size = std::tuple_size_v<decltype(packet)>;
-    int size2 = 0;
-    const_for_<size>([&](auto i){size2 += sizeof(std::get<i.value>(packet));});
-    auto current_user_test = users.find(current_fd);
-    if (current_user_test == users.end() || current_user_test->second.fd < 2)
-        return packet;
-    auto &current_user = current_user_test->second;
-    std::unique_lock<std::mutex> lk(mut);
-    if (size2 > current_user.data_size)
-    {
-        if (timeout >= 0)
-        {
-            if (cond.wait_for(lk, std::chrono::seconds(timeout)) == std::cv_status::timeout)
-                return packet;
-        }
-        else
-        {
-            cond.wait(lk);
-            if (size2 > current_user.data_size)
-                return packet;
-        }
-    }
-    struct packet pkt;
-    pkt.buf_size = size2;
-    pkt.size = size2;
-    pkt.data = current_user.data.get();
-    pkt.start_data = current_user.data.get();
-    pkt.sock = 0;
-    pkt.id = 0;
-    char_size buff = {.data = pkt.data, .consumed_size = 0, .max_size = (int)pkt.size, .start_data = pkt.data};
-    read_comp_pkt(size, buff, packet);
-    std::shared_ptr<char[]> newBuffer(new char[current_user.data_alloc_size]);
-    std::memcpy(newBuffer.get(), &(current_user.data.get())[size2], current_user.data_size - size2);
-    current_user.data.reset();
-    current_user.data = newBuffer;
-    current_user.data_size = current_user.data_size - size2;
-    std::lock_guard<std::mutex> lock(internal);
-    if (current_user.data_size <= 0)
-    {
-        current_user.readable = false;
-        readable.erase(std::remove(readable.begin(), readable.end(), current_fd), readable.end());
-    }
-    std::println("data size is {}", current_user.data_size);
-    return packet;
+    remove_from_list(current_fd, epfd);
+    std::println("Removed fd {} from epoll", current_fd);
+    close(current_fd);
+    users.erase(current_fd);
+    readable.erase(std::remove(readable.begin(), readable.end(), current_fd), readable.end());
 }
+
+template <typename T>
+void netlib::netlib<T>::add_to_list(int sockfd)
+{
+    struct kevent ev;
+    EV_SET(&ev, sockfd, EVFILT_READ, EV_ADD, 0, 0, 0);
+    kevent(epfd, &ev, 1, NULL, 0, NULL);
+}
+
+template<typename T>
+void netlib::netlib<T>::remove_from_list(int fd, int epfd)
+{
+    struct kevent ev;
+    EV_SET(&ev, fd, EVFILT_READ, EV_DELETE, 0, 0, 0);
+    kevent(epfd, &ev, 1, NULL, 0, NULL);
+}
+
+template <typename T>
+inline void netlib::netlib<T>::recv_th()
+{
+    int events_ready = 0;
+    struct kevent events[1024];
+    struct timespec timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_nsec = 500000000; //500ms
+    int status = 0;
+    while (threads == true)
+    {
+        events_ready = kevent(epfd, NULL, 0, events, 1024, nullptr);
+        if (events_ready == -1)
+        {
+            std::println("Epoll/kqueue failed {}", strerror(errno));
+            break;
+        }
+        for (int i = 0; i < events_ready; i++)
+        {
+            int current_fd = events[i].ident;
+            if (current_fd == fd)
+            {
+                sockaddr_in addr = {0};
+                unsigned int addr_size = sizeof(addr);
+                char str[INET_ADDRSTRLEN];
+                int new_client = accept(fd, (sockaddr *)&addr, &addr_size);
+                std::println("Client accepted");
+                netlib::add_to_list(new_client);
+                struct in_addr ipAddr = addr.sin_addr;
+                std::println("{} connected", inet_ntop(AF_INET, &ipAddr, str, INET_ADDRSTRLEN));
+                std::println("New fd {}", new_client);
+                users.emplace(std::piecewise_construct, std::forward_as_tuple(new_client), std::forward_as_tuple(new_client, sizeof(T)));
+                continue;
+            }
+            auto current_user_prov = users.find(current_fd);
+            if (current_user_prov == users.end())
+            {
+                remove_from_list(current_fd, epfd);
+                continue;
+            }
+            auto &current_user = current_user_prov->second;
+            T head = 0;
+            status = recv(current_fd, &head, sizeof(T), MSG_PEEK);
+            if (status == -1 || status == 0)
+            {
+                disconnect_user(current_fd);
+                continue;
+            }
+            packet_raw<T> pkt= {0};
+            pkt.size = head + sizeof(T);
+            pkt.data = (char *)calloc(head + sizeof(T) + 1, sizeof(char));
+            status = recv(current_fd, pkt.data, pkt.size, 0);
+            if (status == -1 || status == 0)
+            {
+                disconnect_user(current_fd);
+                continue;
+            }
+            int data_recv = status;
+            bool user_disconnect = false;
+            while (data_recv < head + sizeof(T))
+            {
+                int data_left = (head + sizeof(T)) - data_recv; 
+                status = recv(current_fd, &pkt.data[data_recv], data_left, 0);
+                if (status == -1 || status == 0)
+                {
+                    std::lock_guard<std::mutex> lock(sync);
+                    disconnect_user(current_fd);
+                    user_disconnect = true;
+                    break;
+                }
+                data_recv += status;
+            }
+            if (user_disconnect == true)
+                continue;
+            std::lock_guard<std::mutex> lock(sync);
+            current_user.packets.push_back(pkt);
+            if (std::find(readable.begin(), readable.end(), current_fd) == readable.end())
+                readable.push_back(current_fd);
+        }
+    }
+}
+

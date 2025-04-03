@@ -134,8 +134,11 @@ struct write_var<std::vector<T, std::allocator<T>>>
     }
 };
 
-template<typename ...T>
-int send_packet(std::tuple<T...> packet, int sock);
+namespace netlib
+{
+    template<typename ...T>
+    int send_packet(std::tuple<T...> packet, int sock);
+}
 
 template<typename ...T>
 int write_to_file(std::tuple<T...> packet, int fd);

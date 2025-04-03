@@ -98,5 +98,8 @@ template <auto N, typename F> constexpr void const_for_(F&& func)
         const_for_each_(std::make_integer_sequence<decltype(N), N>{}, std::forward<F>(func));
 }
 
-template<typename ...T>
-std::tuple<T...> read_packet(std::tuple<T...> packet, struct packet pkt);
+namespace netlib
+{
+    template<typename ...T>
+    std::tuple<T...> read_packet(std::tuple<T...> packet, struct packet pkt);
+}

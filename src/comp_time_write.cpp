@@ -35,28 +35,23 @@ void write_array(char *v, T value)
 }
 
 
-template<typename ...T>
-int send_packet(std::tuple<T...> packet, int sock)
+namespace netlib
 {
-    char *buffer = (char *)malloc(1024 * sizeof(char));
-    char *start_buffer = buffer;
-    std::string buf;
-    size_t size_ = 0;
-    constexpr std::size_t size = std::tuple_size_v<decltype(packet)>;
-    char_size buff = {buffer, 0, 1024, start_buffer};
-    write_comp_pkt(size, buff, packet);
-    
-    char *final_buffer = (char *)calloc(buff.max_size, sizeof(char));
-    size_ = 0;
-    std::memcpy(final_buffer, buf.c_str(), size_);
-    std::memcpy(&final_buffer[size_], buff.start_data, buff.consumed_size);
+    template<typename ...T>
+    int send_packet(std::tuple<T...> packet, int sock)
+    {
+        char *buffer = (char *)malloc(1024 * sizeof(char));
+        char *start_buffer = buffer;
+        constexpr std::size_t size = std::tuple_size_v<decltype(packet)>;
+        char_size buff = {buffer, 0, 1024, start_buffer};
+        write_comp_pkt(size, buff, packet);
 
-    int ret = send(sock, final_buffer, buff.consumed_size + size_, 0);
-    std::println("Sent {}B", ret);
-    free(final_buffer);
-    free(buff.start_data);
-    
-    return ret;
+        int ret = send(sock, buff.start_data, buff.consumed_size, 0);
+        std::println("Sent {}B", ret);
+        free(buff.start_data);
+        
+        return ret;
+    }
 }
 
 template<typename ...T>
