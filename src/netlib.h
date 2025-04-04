@@ -18,6 +18,8 @@
 #include "comp_time_read.h"
 #include "comp_time_write.h"
 
+#define MAX_PACKET_SIZE 8192
+
 template <typename T>
 struct packet_raw
 {
@@ -61,7 +63,7 @@ namespace netlib
             std::mutex sync;
         private:
             void add_to_list(int sockfd);
-            void remove_from_list(int fd, int epfd);
+            void remove_from_list(int fd);
             void recv_th();
             int epfd;
             bool threads;
@@ -101,13 +103,14 @@ inline void netlib::server<T>::open_server(std::string address, short port)
 template<typename T>
 void netlib::server<T>::disconnect_user(int current_fd)
 {
-    remove_from_list(current_fd, epfd);
+    remove_from_list(current_fd);
     std::println("Removed fd {} from epoll", current_fd);
     close(current_fd);
     users.erase(current_fd);
     readable.erase(std::remove(readable.begin(), readable.end(), current_fd), readable.end());
 }
 
+#if defined(__APPLE__) || defined(__FreeBSD__)
 template <typename T>
 void netlib::server<T>::add_to_list(int sockfd)
 {
@@ -117,25 +120,49 @@ void netlib::server<T>::add_to_list(int sockfd)
 }
 
 template<typename T>
-void netlib::server<T>::remove_from_list(int fd, int epfd)
+void netlib::server<T>::remove_from_list(int fd)
 {
     struct kevent ev;
     EV_SET(&ev, fd, EVFILT_READ, EV_DELETE, 0, 0, 0);
     kevent(epfd, &ev, 1, NULL, 0, NULL);
 }
+#elif defined(__linux__)
+template<typename T>
+void netlib::server<T>::add_to_list(int sockfd)
+{
+    epoll_event event;
+    event.data.fd = fd;
+    event.events = EPOLLIN;
+    epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event);
+}
+
+template<typename T>
+void netlib::server<T>::remove_from_list(int fd)
+{
+    epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);
+}
+#endif
 
 template <typename T>
 inline void netlib::server<T>::recv_th()
 {
     int events_ready = 0;
+    #if defined(__APPLE__) || defined(__FreeBSD__)
     struct kevent events[1024];
     struct timespec timeout;
     timeout.tv_sec = 0;
     timeout.tv_nsec = 500000000; //500ms
+    #elif defined(__linux__)
+    epoll_event events[1024];
+    #endif
     int status = 0;
     while (threads == true)
     {
+        #if defined(__APPLE__) || defined(__FreeBSD__)
         events_ready = kevent(epfd, NULL, 0, events, 1024, &timeout);
+        #elif defined(__linux__)
+        events_ready = epoll_wait(epfd, events, 1024, -1);
+        #endif
         if (events_ready == -1)
         {
             std::println("Epoll/kqueue failed {}", strerror(errno));
@@ -161,13 +188,13 @@ inline void netlib::server<T>::recv_th()
             auto current_user_prov = users.find(current_fd);
             if (current_user_prov == users.end())
             {
-                remove_from_list(current_fd, epfd);
+                remove_from_list(current_fd);
                 continue;
             }
             auto &current_user = current_user_prov->second;
             T head = 0;
             status = recv(current_fd, &head, sizeof(T), MSG_PEEK);
-            if (status == -1 || status == 0)
+            if (status == -1 || status == 0 || head > MAX_PACKET_SIZE)
             {
                 std::lock_guard<std::mutex> lock(sync);
                 disconnect_user(current_fd);
