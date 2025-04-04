@@ -4,7 +4,11 @@
 #include <arpa/inet.h>
 #include <print>
 #include <thread>
+#if defined(__APPLE__) || defined(__FreeBSD__)
 #include <sys/event.h>
+#elif defined(__linux__)
+#include <sys/epoll.h>
+#endif
 #include <vector>
 #include <unistd.h>
 #include <fcntl.h>
@@ -96,7 +100,11 @@ inline void netlib::server<T>::open_server(std::string address, short port)
         close(fd);
         return ;
     }
+    #if defined(__APPLE__) || defined(__FreeBSD__)
     epfd = kqueue();
+    #elif defined(__linux__)
+    epfd = epoll_create1(0);
+    #endif
     add_to_list(fd);
     recv_thread = std::thread([this]() { this->recv_th(); });
 }
