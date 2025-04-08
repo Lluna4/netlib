@@ -112,6 +112,8 @@ namespace netlib
             void open_server(std::string address, short port);
             void disconnect_user(int current_fd);
             char *receive_data(int current_fd, size_t size);
+            template<typename ...T>
+            std::tuple<T...> read_packet(int current_fd, std::tuple<T...> packet);
             std::vector<int> get_readable();
             std::vector<int> readable;
             std::map<int, user_raw> users;
@@ -124,6 +126,27 @@ namespace netlib
             bool threads;
             std::thread recv_thread;
     };
+    template <typename... T>
+    inline std::tuple<T...> server_raw::read_packet(int current_fd, std::tuple<T...> packet)
+    {
+        constexpr std::size_t size_tuple = std::tuple_size_v<decltype(packet)>;
+        int size = 0;
+        const_for_<size_tuple>([&](auto i){size += sizeof(std::get<i.value>(packet));});
+        
+        std::lock_guard<std::mutex> lock(sync);
+        
+        auto current_user_test = users.find(current_fd);
+        if (current_user_test == users.end())
+            return packet;
+        auto &current_user = current_user_test->second;
+        
+        if (size == current_user.data_size)
+            readable.erase(std::remove(readable.begin(), readable.end(), current_fd), readable.end());
+        char *data = current_user.receive_data(size);
+        struct packet pkt = {size, size, data, data};
+        packet = netlib::read_packet(packet, pkt);
+        return packet;
+    }
 }
 template <typename T>
 inline void netlib::server<T>::open_server(std::string address, short port)

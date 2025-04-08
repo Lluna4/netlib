@@ -34,8 +34,8 @@ struct char_size
 
 struct packet
 {
-	unsigned long size;
-	std::size_t buf_size;
+	int size;
+	int buf_size;
 	char *data;
 	char *start_data;
 	bool operator==(const packet& other) const 
