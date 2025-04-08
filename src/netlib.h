@@ -41,6 +41,23 @@ struct user
     std::vector<packet_raw<T>> packets;
 };
 
+struct user_raw
+{
+    user_raw(int sockfd)
+    :fd(sockfd)
+    {
+        data = (char *)calloc(1024, sizeof(char));
+        data_size = 0;
+        alloc_size = 1024;
+    }
+    int fd;
+    char *data;
+    size_t data_size;
+    size_t alloc_size;
+    void add_data(char *new_data, size_t size);
+    void remove_data(size_t size);
+};
+
 namespace netlib
 {
     template<typename T>
@@ -64,6 +81,35 @@ namespace netlib
             std::map<int, std::vector<packet_raw<T>>> check_packets();
             std::vector<int> readable;
             std::map<int, user<T>> users;
+            std::mutex sync;
+        private:
+            void add_to_list(int sockfd);
+            void remove_from_list(int fd);
+            void recv_th();
+            int epfd;
+            bool threads;
+            std::thread recv_thread;
+    };
+
+    class server_raw
+    {
+        public:
+            server_raw()
+            {
+                fd = 0;
+                epfd = 0;
+                threads = true;
+            }
+            ~server_raw()
+            {
+                threads = false;
+                recv_thread.join();
+            }
+            int fd;
+            void open_server(std::string address, short port);
+            void disconnect_user(int current_fd);
+            std::vector<int> readable;
+            std::map<int, user_raw> users;
             std::mutex sync;
         private:
             void add_to_list(int sockfd);
