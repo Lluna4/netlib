@@ -101,5 +101,11 @@ template <auto N, typename F> constexpr void const_for_(F&& func)
 namespace netlib
 {
     template<typename ...T>
-    std::tuple<T...> read_packet(std::tuple<T...> packet, struct packet pkt);
+    std::tuple<T...> read_packet(std::tuple<T...> packet, struct packet pkt)
+    {
+        char_size buff = {.data = pkt.data, .consumed_size = 0, .max_size = (int)pkt.size, .start_data = pkt.data};
+        constexpr std::size_t size = std::tuple_size_v<decltype(packet)>;
+        read_comp_pkt(size, buff, packet);
+        return packet;
+    }
 }

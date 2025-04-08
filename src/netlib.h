@@ -56,6 +56,9 @@ struct user_raw
     size_t alloc_size;
     void add_data(char *new_data, size_t size);
     void remove_data(size_t size);
+    char *receive_data(size_t size);
+    std::atomic_bool readable;
+    std::mutex sync;
 };
 
 namespace netlib
@@ -108,6 +111,7 @@ namespace netlib
             int fd;
             void open_server(std::string address, short port);
             void disconnect_user(int current_fd);
+            char *receive_data(int current_fd, size_t size);
             std::vector<int> readable;
             std::map<int, user_raw> users;
             std::mutex sync;
@@ -215,7 +219,7 @@ inline void netlib::server<T>::recv_th()
         #if defined(__APPLE__) || defined(__FreeBSD__)
         events_ready = kevent(epfd, NULL, 0, events, 1024, &timeout);
         #elif defined(__linux__)
-        events_ready = epoll_wait(epfd, events, 1024, -1);
+        events_ready = epoll_wait(epfd, events, 1024, 500);
         #endif
         if (events_ready == -1)
         {
