@@ -112,6 +112,7 @@ namespace netlib
             void open_server(std::string address, short port);
             void disconnect_user(int current_fd);
             char *receive_data(int current_fd, size_t size);
+            std::vector<int> get_readable();
             std::vector<int> readable;
             std::map<int, user_raw> users;
             std::mutex sync;

@@ -92,6 +92,12 @@ char *netlib::server_raw::receive_data(int current_fd, size_t size)
     return current_user.receive_data(size);
 }
 
+std::vector<int> netlib::server_raw::get_readable()
+{
+    std::lock_guard<std::mutex> lock(sync);
+    return readable;
+}
+
 #if defined(__APPLE__) || defined(__FreeBSD__)
 void netlib::server_raw::add_to_list(int sockfd)
 {
