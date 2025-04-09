@@ -209,3 +209,146 @@ char *user_raw::receive_data(size_t size)
     }
     return nullptr;
 }
+
+
+void netlib::cli_raw::add_data(char *new_data, size_t size)
+{
+    std::lock_guard<std::mutex> lock(sync);
+    if (!new_data || size == 0 || size > MAX_PACKET_SIZE)
+        return;
+    if (data_size + size > alloc_size)
+    {
+        data = (char *)realloc(data, size + data_size + 1);
+        if (!data)
+        {
+            std::runtime_error(std::format("Realloc failed {}", strerror(errno)).c_str());
+        }
+        alloc_size = data_size + size + 1;
+    }
+    memcpy(&data[data_size], new_data, size);
+    data_size += size;
+}
+
+void netlib::cli_raw::remove_data(size_t size)
+{
+    std::lock_guard<std::mutex> lock(sync);
+    if (size == 0)
+        return;
+    int new_data_size = data_size - size;
+    if (new_data_size < 0)
+        return;
+    char *new_data = (char *)calloc(alloc_size, sizeof(char));
+    if (!new_data)
+        std::runtime_error(std::format("Calloc failed {}", strerror(errno)).c_str());
+    memcpy(new_data, &data[size], new_data_size);
+    free(data);
+    data = new_data;
+    data_size = new_data_size;
+    if (data_size == 0)
+        readable = false;
+}
+
+char *netlib::cli_raw::receive_data(size_t size)
+{
+    if (readable == true)
+    {
+        if (size > data_size)
+        {
+            size = data_size;
+        }    
+        char *ret = (char *)calloc(size, sizeof(char));
+        memcpy(ret, data, size);
+        remove_data(size);
+        return ret;
+    }
+    return nullptr;
+}
+
+void netlib::client_raw::connect_to_server(std::string address, short port)
+{
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in addr = {0};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    
+    if (inet_pton(AF_INET, address.c_str(), &(addr.sin_addr)) == -1)
+    {
+        std::println("Inet pton failed! {}", strerror(errno));
+        close(fd);
+        return ;
+    }
+    if (connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == -1)
+    {
+        std::println("Connect failed!");
+        return ;
+    }
+    #if defined(__APPLE__) || defined(__FreeBSD__)
+    epfd = kqueue();
+    struct kevent ev;
+    EV_SET(&ev, fd, EVFILT_READ, EV_ADD, 0, 0, 0);
+    kevent(epfd, &ev, 1, NULL, 0, NULL);
+    #elif defined(__linux__)
+    epfd = epoll_create1(0);
+    epoll_event event;
+    event.data.fd = fd;
+    event.events = EPOLLIN;
+    epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event);
+    #endif
+    recv_thread = std::thread([this]() { this->recv_th(); });
+}
+
+void netlib::client_raw::disconnect_from_server()
+{
+    close(fd);
+}
+
+char *netlib::client_raw::receive_data(int current_fd, size_t size)
+{
+    std::lock_guard<std::mutex> lock(sync);
+    auto &current_user = serv;
+    if (size == current_user.data_size)
+        readable = false;
+    return current_user.receive_data(size);
+}
+
+void netlib::client_raw::recv_th()
+{
+    int events_ready = 0;
+    #if defined(__APPLE__) || defined(__FreeBSD__)
+    struct kevent events[1024];
+    struct timespec timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_nsec = 500000000; //500ms
+    #elif defined(__linux__)
+    epoll_event events[1024];
+    #endif
+    int status = 0;
+    char *buffer = (char *)calloc(1024, sizeof(char));
+    while (threads == true)
+    {
+        #if defined(__APPLE__) || defined(__FreeBSD__)
+        events_ready = kevent(epfd, NULL, 0, events, 1024, &timeout);
+        #elif defined(__linux__)
+        events_ready = epoll_wait(epfd, events, 1024, -1);
+        #endif
+        if (events_ready == -1)
+        {
+            std::println("Epoll/kqueue failed {}", strerror(errno));
+            break;
+        }
+        for (int i = 0; i < events_ready; i++)
+        {
+            int current_fd = events[i].ident;
+            status = recv(current_fd, buffer, 1024, 0);
+            if (status == -1 || status == 0)
+            {
+                std::lock_guard<std::mutex> lock(sync);
+                disconnect_from_server();
+                continue;
+            }
+            serv.add_data(buffer, status);
+            std::lock_guard<std::mutex> lock(sync);
+            readable = true;
+        }
+    }
+}

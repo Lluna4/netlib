@@ -126,6 +126,80 @@ namespace netlib
             bool threads;
             std::thread recv_thread;
     };
+    struct cli_raw
+    {
+        cli_raw()
+        {
+            fd = 0;
+            data = (char *)calloc(1024, sizeof(char));
+            data_size = 0;
+            alloc_size = 1024;
+        }
+        cli_raw(int sockfd)
+        :fd(sockfd)
+        {
+            data = (char *)calloc(1024, sizeof(char));
+            data_size = 0;
+            alloc_size = 1024;
+        }
+        int fd;
+        char *data;
+        size_t data_size;
+        size_t alloc_size;
+        void add_data(char *new_data, size_t size);
+        void remove_data(size_t size);
+        char *receive_data(size_t size);
+        std::atomic_bool readable;
+        std::mutex sync;
+    };
+    
+    class client_raw
+    {
+        public:
+            client_raw()
+            {
+                fd = 0;
+                epfd = 0;
+                threads = true;
+                readable = false;
+            }
+            ~client_raw()
+            {
+                threads = false;
+                recv_thread.join();
+            }
+            int fd;
+            void connect_to_server(std::string address, short port);
+            void disconnect_from_server();
+            char *receive_data(int current_fd, size_t size);
+            template<typename ...T>
+            std::tuple<T...> read_packet(int current_fd, std::tuple<T...> packet);
+            std::atomic_bool readable;
+            std::mutex sync;
+        private:
+            cli_raw serv;
+            void recv_th();
+            int epfd;
+            bool threads;
+            std::thread recv_thread;
+    };
+    
+    template <typename... T>
+    inline std::tuple<T...> client_raw::read_packet(int current_fd, std::tuple<T...> packet)
+    {
+        constexpr std::size_t size_tuple = std::tuple_size_v<decltype(packet)>;
+        int size = 0;
+        const_for_<size_tuple>([&](auto i){size += sizeof(std::get<i.value>(packet));});
+        
+        std::lock_guard<std::mutex> lock(sync);
+        
+        auto &current_user = serv;
+        
+        char *data = current_user.receive_data(size);
+        struct packet pkt = {size, size, data, data};
+        packet = netlib::read_packet(packet, pkt);
+        return packet;
+    }
     template <typename... T>
     inline std::tuple<T...> server_raw::read_packet(int current_fd, std::tuple<T...> packet)
     {
