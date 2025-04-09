@@ -307,7 +307,10 @@ char *netlib::client_raw::receive_data(int current_fd, size_t size)
     std::lock_guard<std::mutex> lock(sync);
     auto &current_user = serv;
     if (size == current_user.data_size)
+    {
         readable = false;
+        serv.readable = false;
+    }
     return current_user.receive_data(size);
 }
 
@@ -349,6 +352,7 @@ void netlib::client_raw::recv_th()
             serv.add_data(buffer, status);
             std::lock_guard<std::mutex> lock(sync);
             readable = true;
+            serv.readable = true;
         }
     }
 }
