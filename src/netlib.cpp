@@ -116,9 +116,9 @@ void netlib::server_raw::remove_from_list(int fd)
 void netlib::server_raw::add_to_list(int sockfd)
 {
     epoll_event event;
-    event.data.fd = fd;
+    event.data.fd = sockfd;
     event.events = EPOLLIN;
-    epoll_ctl(epfd, EPOLL_CTL_ADD, fd, &event);
+    epoll_ctl(epfd, EPOLL_CTL_ADD, sockfd, &event);
 }
 
 void netlib::server_raw::remove_from_list(int fd)
@@ -154,7 +154,11 @@ void netlib::server_raw::recv_th()
         }
         for (int i = 0; i < events_ready; i++)
         {
+            #if defined(__APPLE__) || defined(__FreeBSD__)
             int current_fd = events[i].ident;
+            #elif defined(__linux__)
+            int current_fd = events[i].data.fd;
+            #endif
             if (current_fd == fd)
             {
                 sockaddr_in addr = {0};
@@ -341,7 +345,11 @@ void netlib::client_raw::recv_th()
         }
         for (int i = 0; i < events_ready; i++)
         {
+            #if defined(__APPLE__) || defined(__FreeBSD__)
             int current_fd = events[i].ident;
+            #elif defined(__linux__)
+            int current_fd = events[i].data.fd;
+            #endif
             status = recv(current_fd, buffer, 1024, 0);
             if (status == -1 || status == 0)
             {

@@ -326,7 +326,11 @@ inline void netlib::server<T>::recv_th()
         }
         for (int i = 0; i < events_ready; i++)
         {
+            #if defined(__APPLE__) || defined(__FreeBSD__)
             int current_fd = events[i].ident;
+            #elif defined(__linux__)
+            int current_fd = events[i].data.fd;
+            #endif
             if (current_fd == fd)
             {
                 sockaddr_in addr = {0};
