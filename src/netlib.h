@@ -112,6 +112,7 @@ namespace netlib
             void open_server(std::string address, short port);
             void disconnect_user(int current_fd);
             char *receive_data(int current_fd, size_t size);
+            char *receive_everything(int current_fd);
             template<typename ...T>
             std::tuple<T...> read_packet(int current_fd, std::tuple<T...> packet);
             std::vector<int> get_readable();
