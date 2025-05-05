@@ -112,10 +112,12 @@ namespace netlib
             void open_server(std::string address, short port);
             void disconnect_user(int current_fd);
             char *receive_data(int current_fd, size_t size);
-            char *receive_everything(int current_fd);
+            std::pair<char *, size_t> receive_everything(int current_fd);
             template<typename ...T>
             std::tuple<T...> read_packet(int current_fd, std::tuple<T...> packet);
             std::vector<int> get_readable();
+            std::vector<int> wait_readable();
+            void set_target(size_t target_s);
             std::vector<int> readable;
             std::map<int, user_raw> users;
             std::mutex sync;
@@ -125,6 +127,9 @@ namespace netlib
             void recv_th();
             int epfd;
             bool threads;
+            bool target;
+            size_t target_size;
+            std::condition_variable readable_cv;
             std::thread recv_thread;
     };
     struct cli_raw

@@ -92,22 +92,37 @@ char *netlib::server_raw::receive_data(int current_fd, size_t size)
     return current_user.receive_data(size);
 }
 
-char *netlib::server_raw::receive_everything(int current_fd)
+std::pair<char *, size_t> netlib::server_raw::receive_everything(int current_fd)
 {
     std::lock_guard<std::mutex> lock(sync);
     auto current_user_test = users.find(current_fd);
     if (current_user_test == users.end())
-        return nullptr;
+        return std::pair<char *, size_t>();
     auto &current_user = current_user_test->second;
     readable.erase(std::remove(readable.begin(), readable.end(), current_fd), readable.end());
     std::println("Got {}B", current_user.data_size);
-    return current_user.receive_data(current_user.data_size);
+    return std::pair<char *, size_t>(current_user.receive_data(current_user.data_size), current_user.data_size);
 }
 
 std::vector<int> netlib::server_raw::get_readable()
 {
     std::lock_guard<std::mutex> lock(sync);
     return readable;
+}
+
+std::vector<int> netlib::server_raw::wait_readable()
+{
+    std::unique_lock<std::mutex> lock(sync);
+    if (readable.empty())
+        readable_cv.wait(lock);
+    return readable;
+}
+
+void netlib::server_raw::set_target(size_t target_s)
+{
+    std::lock_guard<std::mutex> lock(sync);
+    target = true;
+    target_size = target_s;
 }
 
 #if defined(__APPLE__) || defined(__FreeBSD__)
@@ -203,13 +218,25 @@ void netlib::server_raw::recv_th()
             std::lock_guard<std::mutex> lock(sync);
             if (std::find(readable.begin(), readable.end(), current_fd) == readable.end())
             {
+                if (target)
+                {
+                    if (current_user.data_size >= target_size)
+                    {
+                        current_user.readable = true;
+                        readable.push_back(current_fd);
+                        readable_cv.notify_all();
+                        target = false;
+                    }
+                    continue;
+                }
                 int count = 0;
-                ioctl(fd, FIONREAD, &count);
+                ioctl(current_fd, FIONREAD, &count);
 
                 if (count == 0)
                 {
                     current_user.readable = true;
                     readable.push_back(current_fd);
+                    readable_cv.notify_all();
                 }
             }
         }
