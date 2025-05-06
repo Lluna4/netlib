@@ -49,16 +49,23 @@ struct user_raw
         data = (char *)calloc(1024, sizeof(char));
         data_size = 0;
         alloc_size = 1024;
+        target = false;
+        target_permanent = false;
+        target_size = 0;
     }
     int fd;
     char *data;
     size_t data_size;
     size_t alloc_size;
+    void set_target(size_t target_s, bool permanent = false);
     void add_data(char *new_data, size_t size);
     void remove_data(size_t size);
     char *receive_data(size_t size);
     std::atomic_bool readable;
     std::mutex sync;
+    bool target;
+    bool target_permanent;
+    size_t target_size;
 };
 
 namespace netlib
@@ -103,6 +110,16 @@ namespace netlib
                 epfd = 0;
                 threads = true;
             }
+            server_raw(bool server_target, int target_size)
+            {
+                fd = 0;
+                epfd = 0;
+                threads = true;
+                if (server_target)
+                    server_target_size = target_size;
+                else
+                    server_target_size = 0;
+            }
             ~server_raw()
             {
                 threads = false;
@@ -117,7 +134,7 @@ namespace netlib
             std::tuple<T...> read_packet(int current_fd, std::tuple<T...> packet);
             std::vector<int> get_readable();
             std::vector<int> wait_readable();
-            void set_target(size_t target_s);
+            void set_target(int client_fd, size_t target_s, bool permanent = false);
             std::vector<int> readable;
             std::map<int, user_raw> users;
             std::mutex sync;
@@ -127,8 +144,7 @@ namespace netlib
             void recv_th();
             int epfd;
             bool threads;
-            bool target;
-            size_t target_size;
+            int server_target_size;
             std::condition_variable readable_cv;
             std::thread recv_thread;
     };

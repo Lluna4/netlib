@@ -118,11 +118,21 @@ std::vector<int> netlib::server_raw::wait_readable()
     return readable;
 }
 
-void netlib::server_raw::set_target(size_t target_s)
+void netlib::server_raw::set_target(int client_fd, size_t target_s, bool permanent)
 {
     std::lock_guard<std::mutex> lock(sync);
+    auto current_user_test = users.find(client_fd);
+    if (current_user_test == users.end())
+        return ;
+    auto &current_user = current_user_test->second;
+    current_user.set_target(target_s, permanent);
+}
+
+void user_raw::set_target(size_t target_s, bool permanent)
+{
     target = true;
     target_size = target_s;
+    target_permanent = permanent;
 }
 
 #if defined(__APPLE__) || defined(__FreeBSD__)
@@ -197,7 +207,9 @@ void netlib::server_raw::recv_th()
                 struct in_addr ipAddr = addr.sin_addr;
                 std::println("{} connected", inet_ntop(AF_INET, &ipAddr, str, INET_ADDRSTRLEN));
                 std::println("New fd {}", new_client);
-                users.emplace(std::piecewise_construct, std::forward_as_tuple(new_client), std::forward_as_tuple(new_client));
+                auto new_user = users.emplace(std::piecewise_construct, std::forward_as_tuple(new_client), std::forward_as_tuple(new_client));
+                if (server_target_size > 0)
+                    new_user.first->second.set_target(server_target_size, true);
                 continue;
             }
             auto current_user_prov = users.find(current_fd);
@@ -218,14 +230,15 @@ void netlib::server_raw::recv_th()
             std::lock_guard<std::mutex> lock(sync);
             if (std::find(readable.begin(), readable.end(), current_fd) == readable.end())
             {
-                if (target)
+                if (current_user.target)
                 {
-                    if (current_user.data_size >= target_size)
+                    if (current_user.data_size >= current_user.target_size)
                     {
                         current_user.readable = true;
                         readable.push_back(current_fd);
                         readable_cv.notify_all();
-                        target = false;
+                        if (current_user.target_permanent == false)
+                            current_user.target = false;
                     }
                     continue;
                 }
