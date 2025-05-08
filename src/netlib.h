@@ -109,6 +109,7 @@ namespace netlib
                 fd = 0;
                 epfd = 0;
                 threads = true;
+                server_target_size = 0;
             }
             server_raw(bool server_target, int target_size)
             {
@@ -129,6 +130,7 @@ namespace netlib
             void open_server(std::string address, short port);
             void disconnect_user(int current_fd);
             char *receive_data(int current_fd, size_t size);
+            char *receive_data_ensured(int current_fd, size_t size);
             std::pair<char *, size_t> receive_everything(int current_fd);
             template<typename ...T>
             std::tuple<T...> read_packet(int current_fd, std::tuple<T...> packet);

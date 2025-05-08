@@ -92,6 +92,29 @@ char *netlib::server_raw::receive_data(int current_fd, size_t size)
     return current_user.receive_data(size);
 }
 
+char *netlib::server_raw::receive_data_ensured(int current_fd, size_t size)
+{
+    std::unique_lock<std::mutex> lock(sync);
+    size_t user_previous_target = 0;
+    bool user_previous_permanency = false;
+    auto current_user_test = users.find(current_fd);
+    if (current_user_test == users.end())
+        return nullptr;
+    auto &current_user = current_user_test->second;
+    if (current_user.target)
+    {
+        user_previous_target = current_user.target_size;
+        user_previous_permanency = current_user.target_permanent;
+    }
+    current_user.set_target(size, false);
+    lock.unlock();
+    wait_readable();
+    if (user_previous_target > 0)
+        set_target(current_fd, user_previous_target, user_previous_permanency);
+    return current_user.receive_data(size);
+}
+
+
 std::pair<char *, size_t> netlib::server_raw::receive_everything(int current_fd)
 {
     std::lock_guard<std::mutex> lock(sync);
@@ -125,6 +148,7 @@ void netlib::server_raw::set_target(int client_fd, size_t target_s, bool permane
     if (current_user_test == users.end())
         return ;
     auto &current_user = current_user_test->second;
+    readable.erase(std::remove(readable.begin(), readable.end(), client_fd), readable.end());
     current_user.set_target(target_s, permanent);
 }
 
