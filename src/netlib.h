@@ -131,6 +131,7 @@ namespace netlib
             void disconnect_user(int current_fd);
             char *receive_data(int current_fd, size_t size);
             char *receive_data_ensured(int current_fd, size_t size);
+            char *get_line(int current_fd);
             std::pair<char *, size_t> receive_everything(int current_fd);
             template<typename ...T>
             std::tuple<T...> read_packet(int current_fd, std::tuple<T...> packet);

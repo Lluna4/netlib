@@ -114,6 +114,30 @@ char *netlib::server_raw::receive_data_ensured(int current_fd, size_t size)
     return current_user.receive_data(size);
 }
 
+char * netlib::server_raw::get_line(int current_fd)
+{
+    std::lock_guard<std::mutex> lock(sync);
+    int index = 0;
+    int index2 = 0;
+
+    const char *end = "\r\n";
+    auto current_user_test = users.find(current_fd);
+    if (current_user_test == users.end())
+        return nullptr;
+    auto &current_user = current_user_test->second;
+    while (current_user.data[index] != '\0')
+    {
+        if (current_user.data[index] == end[index2])
+        {
+            if (index2 == 1)
+                break;
+            index2++;
+        }
+        index++;
+    }
+    return current_user.receive_data(index + 1);
+}
+
 
 std::pair<char *, size_t> netlib::server_raw::receive_everything(int current_fd)
 {
@@ -288,9 +312,10 @@ char *user_raw::receive_data(size_t size)
         {
             size = data_size;
         }    
-        char *ret = (char *)calloc(size, sizeof(char));
+        char *ret = (char *)calloc(size + 1, sizeof(char));
         memcpy(ret, data, size);
         remove_data(size);
+        ret[size] = '\0';
         return ret;
     }
     return nullptr;
