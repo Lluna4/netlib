@@ -137,6 +137,9 @@ namespace netlib
             std::tuple<T...> read_packet(int current_fd, std::tuple<T...> packet);
             std::vector<int> get_readable();
             std::vector<int> wait_readable();
+
+            void wait_readable_fd(int fd);
+
             void set_target(int client_fd, size_t target_s, bool permanent = false);
             std::vector<int> readable;
             std::map<int, user_raw> users;

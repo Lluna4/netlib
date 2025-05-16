@@ -108,7 +108,7 @@ char *netlib::server_raw::receive_data_ensured(int current_fd, size_t size)
     }
     current_user.set_target(size, false);
     lock.unlock();
-    wait_readable();
+    wait_readable_fd(current_fd);
     if (user_previous_target > 0)
         set_target(current_fd, user_previous_target, user_previous_permanency);
     return current_user.receive_data(size);
@@ -163,6 +163,18 @@ std::vector<int> netlib::server_raw::wait_readable()
     if (readable.empty())
         readable_cv.wait(lock);
     return readable;
+}
+
+void netlib::server_raw::wait_readable_fd(int fd)
+{
+    std::unique_lock<std::mutex> lock(sync);
+    readable.erase(std::remove(readable.begin(), readable.end(), fd), readable.end());
+    while (true)
+    {
+        readable_cv.wait(lock);
+        if (std::find(readable.begin(), readable.end(), fd) != readable.end())
+            break;
+    }
 }
 
 void netlib::server_raw::set_target(int client_fd, size_t target_s, bool permanent)
