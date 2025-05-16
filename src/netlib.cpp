@@ -168,6 +168,12 @@ std::vector<int> netlib::server_raw::wait_readable()
 void netlib::server_raw::wait_readable_fd(int fd)
 {
     std::unique_lock<std::mutex> lock(sync);
+    auto current_user_test = users.find(fd);
+    if (current_user_test == users.end())
+        return;
+    auto &current_user = current_user_test->second;
+    if (current_user.data_size >= current_user.target_size)
+        return;
     readable.erase(std::remove(readable.begin(), readable.end(), fd), readable.end());
     while (true)
     {
