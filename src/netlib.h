@@ -109,6 +109,7 @@ namespace netlib
                 fd = 0;
                 epfd = 0;
                 threads = true;
+                memory_cap = false;
                 server_target_size = 0;
             }
             server_raw(bool server_target, int target_size)
@@ -116,10 +117,20 @@ namespace netlib
                 fd = 0;
                 epfd = 0;
                 threads = true;
+                memory_cap = false;
                 if (server_target)
                     server_target_size = target_size;
                 else
                     server_target_size = 0;
+            }
+            explicit server_raw(long cap_memory_size)
+            :memory_cap_size(cap_memory_size)
+            {
+                fd = 0;
+                epfd = 0;
+                threads = true;
+                memory_cap = true;
+                server_target_size = 0;
             }
             ~server_raw()
             {
@@ -151,6 +162,8 @@ namespace netlib
             int epfd;
             bool threads;
             int server_target_size;
+            bool memory_cap;
+            long memory_cap_size;
             std::condition_variable readable_cv;
             std::thread recv_thread;
     };
@@ -380,6 +393,7 @@ inline void netlib::server<T>::recv_th()
                 continue;
             }
             auto &current_user = current_user_prov->second;
+
             T head = 0;
             status = recv(current_fd, &head, sizeof(T), MSG_PEEK);
             if (status == -1 || status == 0 || head > MAX_PACKET_SIZE)

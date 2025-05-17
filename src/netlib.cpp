@@ -111,6 +111,8 @@ char *netlib::server_raw::receive_data_ensured(int current_fd, size_t size)
     wait_readable_fd(current_fd);
     if (user_previous_target > 0)
         set_target(current_fd, user_previous_target, user_previous_permanency);
+    else
+        set_target(current_fd, 0, false);
     return current_user.receive_data(size);
 }
 
@@ -285,6 +287,14 @@ void netlib::server_raw::recv_th()
                 continue;
             }
             auto &current_user = current_user_prov->second;
+            if (memory_cap == true)
+            {
+                if (current_user.data_size >= memory_cap_size)
+                {
+                    std::println("memory cap exceeded");
+                    continue;
+                }
+            }
             status = recv(current_fd, buffer, 1024, 0);
             if (status == -1 || status == 0)
             {
