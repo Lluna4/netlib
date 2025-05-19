@@ -292,6 +292,8 @@ void netlib::server_raw::recv_th()
                 if (current_user.data_size >= memory_cap_size)
                 {
                     std::println("memory cap exceeded");
+                    if (events_ready == 1)
+                        std::this_thread::sleep_for(std::chrono::milliseconds(50));
                     continue;
                 }
             }
