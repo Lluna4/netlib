@@ -155,7 +155,10 @@ namespace netlib
             std::vector<int> readable;
             std::map<int, user_raw> users;
             std::mutex sync;
+            void add_whitelist(std::vector<std::string> ips);
         private:
+            bool whitelist;
+            std::vector<std::string> ip_whitelisted;
             void add_to_list(int sockfd);
             void remove_from_list(int fd);
             void recv_th();

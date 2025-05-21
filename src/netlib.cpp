@@ -204,6 +204,12 @@ void user_raw::set_target(size_t target_s, bool permanent)
 }
 
 #if defined(__APPLE__) || defined(__FreeBSD__)
+void netlib::server_raw::add_whitelist(std::vector<std::string> ips)
+{
+    whitelist = true;
+    ip_whitelisted = ips;
+}
+
 void netlib::server_raw::add_to_list(int sockfd)
 {
     struct kevent ev;
@@ -278,6 +284,21 @@ void netlib::server_raw::recv_th()
                 auto new_user = users.emplace(std::piecewise_construct, std::forward_as_tuple(new_client), std::forward_as_tuple(new_client));
                 if (server_target_size > 0)
                     new_user.first->second.set_target(server_target_size, true);
+                if (whitelist)
+                {
+                    bool in_whitelist = false;
+                    for (const auto& x: ip_whitelisted)
+                    {
+                        if (x == str)
+                            in_whitelist = true;
+                    }
+                    if (in_whitelist == false)
+                    {
+                        std::println("Ip {} not in whitelist!", str);
+                        std::lock_guard lock(sync);
+                        disconnect_user(current_fd);
+                    }
+                }
                 continue;
             }
             auto current_user_prov = users.find(current_fd);
