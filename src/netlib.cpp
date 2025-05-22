@@ -204,12 +204,6 @@ void user_raw::set_target(size_t target_s, bool permanent)
 }
 
 #if defined(__APPLE__) || defined(__FreeBSD__)
-void netlib::server_raw::add_whitelist(std::vector<std::string> ips)
-{
-    whitelist = true;
-    ip_whitelisted = ips;
-}
-
 void netlib::server_raw::add_to_list(int sockfd)
 {
     struct kevent ev;
@@ -237,6 +231,12 @@ void netlib::server_raw::remove_from_list(int fd)
     epoll_ctl(epfd, EPOLL_CTL_DEL, fd, nullptr);
 }
 #endif
+
+void netlib::server_raw::add_whitelist(std::vector<std::string> ips)
+{
+    whitelist = true;
+    ip_whitelisted = ips;
+}
 
 void netlib::server_raw::recv_th()
 {
